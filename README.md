@@ -4,7 +4,7 @@
 
 ## 🛠️ 当前技术栈
 - **Language:** Ruby
-- **AI Engine:** Gemini API (1.5-flash)
+- **AI Engine:** Gemini API (3.1)
 - **Data Source:** 日本独立行政法人情报处理推进机构 (IPA) 官方公开题
 
 ## ✨ 核心功能 (MVP V3)
