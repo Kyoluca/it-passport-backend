@@ -6,27 +6,29 @@ require 'base64'
 # 1. 填入你的 API Key
 API_KEY = "AIzaSyDRC1XfMQU_5XlyCmctObQCYkpqP3afyjs"
 
-# 💡 强烈建议：跑 100 题大批量任务时，换回稳定版 1.5-flash
-# 它的并发容忍度极高，几乎不会报 503 错误，而且提取数据的智商完全足够。
+# 💡 V3.1 升级：换用 2026 年度旗舰模型 3.1-pro-preview，确保长文本 JSON 逻辑严密、不丢字段
 uri = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=#{API_KEY}")
 
-qs_pdf_path = "2026r08_ip_qs.pdf"
-ans_pdf_path = "2026r08_ip_ans.pdf"
+qs_pdf_path = "data/pdfs/2026r08_ip_qs.pdf"
+ans_pdf_path = "data/pdfs/2026r08_ip_ans.pdf" # 确保本地有这个官方答案 PDF，没有的话可以用之前的真题测试
 
 puts "正在加载 真题与答案 PDF 文件（只需加载一次）..."
 qs_pdf_base64 = Base64.strict_encode64(File.read(qs_pdf_path))
-ans_pdf_base64 = Base64.strict_encode64(File.read(ans_pdf_path))
+
+# 注意：这里需要你有答案文件，如果没有，可以暂时用 qs_pdf_path 占位测试，正式跑请确保有答案PDF
+ans_pdf_base64 = File.exist?(ans_pdf_path) ? Base64.strict_encode64(File.read(ans_pdf_path)) : qs_pdf_base64
 
 all_results = []
-batch_size = 10   # 每次处理 10 题
-total_batches = 10 # 跑 10 轮就是 100 题
+# 💡 V3.1 升级：降低批处理大小，每次 5 题，确保 AI 保持最高注意力
+batch_size = 5    
+total_batches = 20 # 跑 20 轮就是 100 题
 
 (0...total_batches).each do |batch_index|
   start_q = batch_index * batch_size + 1
   end_q = start_q + batch_size - 1
 
   puts "\n============================================="
-  puts "🚀 开始处理: 【問#{start_q}】 到 【問#{end_q}】"
+  puts "🚀 旗舰模型处理中: 【問#{start_q}】 到 【問#{end_q}】"
   puts "============================================="
 
   # 终极版 Prompt
@@ -47,11 +49,11 @@ Output 要求（严格输出纯 JSON 数组，不要包含 ```json 等 markdown 
   {
     "question_number": #{start_q},
     "correct_answer": "提取出的官方正确选项（如：ア）",
-    "question_type": "概念题 或 计算题",
-    "detailed_explanation": "这是本服务的核心价值！请进行体系化的知识点归纳。排版要求：使用【】来划分模块，使用换行符号 \\n 和项目符号来罗列要点。\\n如果是概念题：请详细对比核心概念。\\n如果是计算题：请参照以下格式给出分步推导过程：\\n【前提条件】...\\n【推导步骤】...\\n【最终结论】因此官方答案为X。",
+    "question_type": "概念题 或 計算题",
+    "detailed_explanation": "这是本服务的核心价值！请进行体系化的知识点归纳。排版要求：使用【】来划分模块，使用换行符号 \\n 和项目符号来罗列要点。\\n如果是概念题：请详细对比核心概念。\\n如果是計算题：请参照以下格式给出分步推导过程：\\n【前提条件】...\\n【推导步骤】...\\n【最终结论】因此官方答案为X。",
     "options_analysis": [
-      // 注意：如果是 "计算题"，此数组必须留空 []。
-      // 如果是 "概念题"，请在这里对四个选项（或a/b/c陈述）进行逐一翻译和辨析。
+      // 🚨 严厉警告：绝对不能省略任何一个选项的 translation 字段！必须逐一翻译！
+      // 注意：如果是 "計算题"，此数组必须留空 []。
       {
         "original_text": "选项的日文原文",
         "translation": "选项的精准中文翻译",
@@ -83,7 +85,7 @@ Output 要求（严格输出纯 JSON 数组，不要包含 ```json 等 markdown 
     begin
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
-      http.read_timeout = 180 # 超时时间放宽到 3 分钟
+      http.read_timeout = 180 
       request = Net::HTTP::Post.new(uri.request_uri, 'Content-Type' => 'application/json')
       request.body = request_body.to_json
 
@@ -93,24 +95,18 @@ Output 要求（严格输出纯 JSON 数组，不要包含 ```json 等 markdown 
         result = JSON.parse(response.body)
         generated_text = result.dig("candidates", 0, "content", "parts", 0, "text")
 
-        # 暴力清理各种可能的 Markdown 符号
         clean_json = generated_text.gsub(/```json\n?/i, "").gsub(/```/i, "").strip
-        
-        # 尝试解析 JSON，如果 AI 返回的格式残缺，这里会触发报错并进入重试
         parsed_json = JSON.parse(clean_json)
         
-        # 保存这个小批次
         filename = "q#{start_q}_to_q#{end_q}.json"
         File.write(filename, clean_json)
         puts "✅ 成功！已保存到 #{filename}"
         
-        # 拼接到总数组中
         all_results.concat(parsed_json)
         success = true
         
-        # 防拥堵策略：成功后强制休息 5 秒，再发起下一波请求
-        puts "⏳ 休息 5 秒后继续..."
-        sleep(5)
+        puts "⏳ 休息 10 秒后继续..."
+        sleep(10)
         
       elsif response.code == "503" || response.code == "429"
         retries += 1
@@ -118,7 +114,8 @@ Output 要求（严格输出纯 JSON 数组，不要包含 ```json 等 markdown 
         sleep(15)
       else
         puts "❌ 请求遇到未知错误：#{response.code} #{response.message}"
-        break # 遇到其他严重错误直接放弃这个批次
+        puts response.body
+        break
       end
       
     rescue JSON::ParserError => e
@@ -142,5 +139,15 @@ Output 要求（严格输出纯 JSON 数组，不要包含 ```json 等 markdown 
 end
 
 # 循环结束后，将所有数据保存为一个终极文件
-File.write("all_100_questions.json", JSON.pretty_generate(all_results))
-puts "\n🎉🎉🎉 大功告成！100道题已全部合并保存为 all_100_questions.json！"
+File.write("data/output/all_100_questions_2026r08.json", JSON.pretty_generate(all_results))
+puts "\n🎉🎉🎉 100道题已全部合并保存为 all_100_questions.json！"
+
+# 💡 V3.1 升级：自动清理所有的中间小文件
+puts "\n🧹 正在清理中间文件..."
+(0...total_batches).each do |batch_index|
+  start_q = batch_index * batch_size + 1
+  end_q = start_q + batch_size - 1
+  filename = "q#{start_q}_to_q#{end_q}.json"
+  File.delete(filename) if File.exist?(filename)
+end
+puts "✨ 清理完成！你的文件夹现在极其清爽。"
