@@ -8,4 +8,3 @@ config.secret.json
 
 # 忽略本地生成的各种测试和全套 JSON 数据包（防止撑爆仓库）
 q*_to_q*.json
-all_100_questions.json
